@@ -90,3 +90,7 @@ docker-compose.override.yml
 # ---------------------------------------------------------------------------
 /tmp_repos/
 t
+
+.agents
+.claude
+skills-lock.json
