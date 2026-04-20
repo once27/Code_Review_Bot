@@ -20,6 +20,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.github.webhook import parse_pr_event, validate_webhook_signature
+from app.github.client import GitHubClient
+from app.github.diff_formatter import format_diff_for_llm, format_diff_summary
 
 # ---------------------------------------------------------------------------
 # Environment & Logging Setup
@@ -53,10 +55,10 @@ async def lifespan(app: FastAPI):
     Shutdown:
         - (Future) Gracefully close connections
     """
-    logger.info("🚀 AI Code Review Bot starting up...")
+    logger.info("AI Code Review Bot starting up...")
     logger.info("   Environment loaded from .env")
     yield
-    logger.info("🛑 AI Code Review Bot shutting down...")
+    logger.info("AI Code Review Bot shutting down...")
 
 
 # ---------------------------------------------------------------------------
@@ -152,17 +154,52 @@ async def github_webhook(request: Request):
     if pr_metadata is None:
         return {"status": "ignored", "reason": "action not supported"}
 
-    # Step 4: TODO (Sprint 4+) — Enqueue Celery task for async review
-    # For now, log the metadata so we can verify the pipeline works
+    # Step 4: Fetch PR diff from GitHub API (Sprint 3)
+    diff_summary = None
+    try:
+        client = GitHubClient()
+        diffs = client.get_pr_diff(
+            owner=pr_metadata["repo_owner"],
+            repo_name=pr_metadata["repo_name"],
+            pr_number=pr_metadata["pr_number"],
+        )
+
+        # Format for LLM consumption (used in Sprint 4+)
+        formatted_diff = format_diff_for_llm(diffs)
+        diff_summary = format_diff_summary(diffs)
+
+        logger.info(
+            "Diff extracted — %d files, +%d -%d lines",
+            diff_summary["total_files"],
+            diff_summary["total_additions"],
+            diff_summary["total_deletions"],
+        )
+        logger.debug("Formatted diff for LLM:\n%s", formatted_diff[:500])
+
+    except Exception as exc:
+        # Diff fetch failure should not cause webhook to fail.
+        # GitHub would retry on non-200 responses, causing duplicate processing.
+        logger.error(
+            "Failed to fetch diff for PR #%s: %s",
+            pr_metadata["pr_number"],
+            exc,
+        )
+
+    # Step 5: TODO (Sprint 4+) — Pass formatted_diff to LLM agents
     logger.info(
-        "✅ Webhook processed — PR #%s ready for review (will enqueue in Sprint 4)",
+        "PR #%s processed — diff %s",
         pr_metadata["pr_number"],
+        "extracted" if diff_summary else "failed",
     )
 
-    return {
+    response = {
         "status": "received",
         "pr_number": pr_metadata["pr_number"],
         "repo": f"{pr_metadata['repo_owner']}/{pr_metadata['repo_name']}",
         "action": pr_metadata["action"],
     }
+    if diff_summary:
+        response["diff_summary"] = diff_summary
+
+    return response
 
