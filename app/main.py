@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.github.webhook import parse_pr_event, validate_webhook_signature
 from app.github.client import GitHubClient
 from app.github.diff_formatter import format_diff_for_llm, format_diff_summary
+from app.agents.general_agent import GeneralReviewAgent
 
 # ---------------------------------------------------------------------------
 # Environment & Logging Setup
@@ -185,11 +186,34 @@ async def github_webhook(request: Request):
             exc,
         )
 
-    # Step 5: TODO (Sprint 4+) — Pass formatted_diff to LLM agents
+    # Step 5: Run LLM review agent on the diff (Sprint 4)
+    review_comments = []
+    if diff_summary and formatted_diff:
+        try:
+            agent = GeneralReviewAgent()
+            review_comments = await agent.review(formatted_diff)
+
+            for comment in review_comments:
+                logger.info(
+                    "💬 [%s] %s:%d — %s",
+                    comment.severity.upper(),
+                    comment.file,
+                    comment.line,
+                    comment.message,
+                )
+
+        except Exception as exc:
+            logger.error(
+                "Agent review failed for PR #%s: %s",
+                pr_metadata["pr_number"],
+                exc,
+            )
+
     logger.info(
-        "PR #%s processed — diff %s",
+        "✅ PR #%s processed — diff %s, %d review comments",
         pr_metadata["pr_number"],
         "extracted" if diff_summary else "failed",
+        len(review_comments),
     )
 
     response = {
@@ -200,6 +224,17 @@ async def github_webhook(request: Request):
     }
     if diff_summary:
         response["diff_summary"] = diff_summary
+    if review_comments:
+        response["review_comments"] = [
+            {
+                "file": c.file,
+                "line": c.line,
+                "severity": c.severity,
+                "message": c.message,
+                "agent": c.agent_type,
+            }
+            for c in review_comments
+        ]
 
     return response
 
