@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.github.webhook import parse_pr_event, validate_webhook_signature
 from app.github.client import GitHubClient
 from app.github.diff_formatter import format_diff_for_llm, format_diff_summary
-from app.agents.general_agent import GeneralReviewAgent
+from app.agents.pipeline import run_review_pipeline
 
 # ---------------------------------------------------------------------------
 # Environment & Logging Setup
@@ -193,17 +193,17 @@ async def github_webhook(request: Request):
             exc,
         )
 
-    # Step 5: Run LLM review agent on the diff (Sprint 4)
+    # Step 5: Run multi-agent review pipeline (Sprint 6)
     review_comments = []
     if diff_summary and formatted_diff:
         try:
-            agent = GeneralReviewAgent()
-            review_comments = await agent.review(formatted_diff)
+            review_comments = await run_review_pipeline(formatted_diff)
 
             for comment in review_comments:
                 logger.info(
-                    "💬 [%s] %s:%d — %s",
+                    "💬 [%s|%s] %s:%d — %s",
                     comment.severity.upper(),
+                    comment.agent_type,
                     comment.file,
                     comment.line,
                     comment.message,
@@ -211,7 +211,7 @@ async def github_webhook(request: Request):
 
         except Exception as exc:
             logger.error(
-                "Agent review failed for PR #%s: %s",
+                "Pipeline review failed for PR #%s: %s",
                 pr_metadata["pr_number"],
                 exc,
             )
