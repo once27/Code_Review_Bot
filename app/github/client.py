@@ -259,3 +259,60 @@ class GitHubClient:
                 path, full_name, ref, exc,
             )
             return None
+
+    def post_review(
+        self,
+        owner: str,
+        repo_name: str,
+        pr_number: int,
+        commit_sha: str,
+        comments: list[dict],
+        summary: str | None = None,
+    ) -> None:
+        """
+        Post a bundle of review comments to a Pull Request as a single Review.
+
+        Args:
+            owner:      Repository owner.
+            repo_name:  Repository name.
+            pr_number:  Pull request number.
+            commit_sha: The SHA of the commit being reviewed (important!).
+            comments:   List of dicts with: {path, line, body, [side]}.
+            summary:    Optional PR-level summary text.
+        """
+        full_name = f"{owner}/{repo_name}"
+        logger.info(
+            "Posting review with %d comments on PR #%d (%s)",
+            len(comments), pr_number, full_name,
+        )
+
+        try:
+            repo = self._github.get_repo(full_name)
+            pr = repo.get_pull(pr_number)
+
+            # Map to PyGitHub expected format
+            # Side 'RIGHT' targets the new code in the PR
+            github_comments = []
+            for c in comments:
+                github_comments.append({
+                    "path": c["path"],
+                    "line": int(c["line"]),
+                    "body": c["body"],
+                    "side": c.get("side", "RIGHT"),
+                })
+
+            pr.create_review(
+                commit=repo.get_commit(commit_sha),
+                body=summary or "AI Code Review completed.",
+                event="COMMENT",
+                comments=github_comments,
+            )
+            logger.info("Review posted successfully to PR #%d", pr_number)
+
+        except GithubException as exc:
+            logger.error(
+                "Failed to post review to PR #%d on %s: %s",
+                pr_number, full_name, exc,
+            )
+            
+

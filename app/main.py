@@ -39,6 +39,13 @@ logging.basicConfig(
 
 logger = logging.getLogger("app")
 
+# Severity Emojis for feedback
+SEVERITY_EMOJI = {
+    "critical": "🔴",
+    "warning": "🟡",
+    "suggestion": "💡",
+}
+
 
 # ---------------------------------------------------------------------------
 # Application Lifespan — startup / shutdown hooks
@@ -215,6 +222,49 @@ async def github_webhook(request: Request):
         "extracted" if diff_summary else "failed",
         len(review_comments),
     )
+
+    # Step 6: Post results to GitHub (Sprint 5)
+    if diff_summary and review_comments:
+        try:
+            # Construct summary text
+            counts = {"critical": 0, "warning": 0, "suggestion": 0}
+            for c in review_comments:
+                counts[c.severity] = counts.get(c.severity, 0) + 1
+            
+            summary_parts = [
+                "###AI Code Review Summary",
+                f"Analyzed **{diff_summary['total_files']}** files. Found **{len(review_comments)}** potential issues.",
+                "\n**Breakdown:**"
+            ]
+            if counts["critical"]: summary_parts.append(f"- 🔴 {counts['critical']} Critical")
+            if counts["warning"]: summary_parts.append(f"- 🟡 {counts['warning']} Warnings")
+            if counts["suggestion"]: summary_parts.append(f"- 💡 {counts['suggestion']} Suggestions")
+            
+            if not any(counts.values()):
+                summary_parts.append("\nNo major issues found. LGTM!")
+
+            summary_text = "\n".join(summary_parts)
+
+            # Map comments to GitHub format
+            github_comments = []
+            for c in review_comments:
+                emoji = SEVERITY_EMOJI.get(c.severity, "💬")
+                github_comments.append({
+                    "path": c.file,
+                    "line": c.line,
+                    "body": f"### {emoji} {c.severity.upper()}\n\n{c.message}"
+                })
+
+            client.post_review(
+                owner=pr_metadata["repo_owner"],
+                repo_name=pr_metadata["repo_name"],
+                pr_number=pr_metadata["pr_number"],
+                commit_sha=pr_metadata["head_sha"],
+                comments=github_comments,
+                summary=summary_text,
+            )
+        except Exception as exc:
+            logger.error("Failed to post GitHub review: %s", exc)
 
     response = {
         "status": "received",
