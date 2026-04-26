@@ -260,6 +260,28 @@ class GitHubClient:
             )
             return None
 
+    def fetch_review_config(
+        self,
+        owner: str,
+        repo_name: str,
+        ref: str = "main",
+    ):
+        """
+        Fetch and parse .codereview.yml from the repo root.
+
+        Returns:
+            ReviewConfig with repo-specific settings, or defaults.
+        """
+        from app.config.review_config import parse_review_config
+
+        yaml_content = self.get_file_content(
+            owner=owner,
+            repo_name=repo_name,
+            path=".codereview.yml",
+            ref=ref,
+        )
+        return parse_review_config(yaml_content)
+
     def post_review(
         self,
         owner: str,
