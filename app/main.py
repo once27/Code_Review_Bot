@@ -172,6 +172,30 @@ async def github_webhook(request: Request):
             pr_number=pr_metadata["pr_number"],
         )
 
+        # Step 4b: Fetch repo config (Sprint 8)
+        review_config = client.fetch_review_config(
+            owner=pr_metadata["repo_owner"],
+            repo_name=pr_metadata["repo_name"],
+            ref=pr_metadata.get("head_sha", "main"),
+        )
+        logger.info(
+            "Review config loaded — agents=%s, threshold=%s, ignore=%d patterns, rules=%d",
+            review_config.enabled_agents,
+            review_config.threshold,
+            len(review_config.ignore),
+            len(review_config.custom_rules),
+        )
+
+        # Filter diffs by ignore patterns from config
+        if review_config.ignore:
+            original_count = len(diffs)
+            diffs = [d for d in diffs if review_config.should_review_file(d.filename)]
+            if len(diffs) < original_count:
+                logger.info(
+                    "Config ignore patterns filtered %d files (kept %d)",
+                    original_count - len(diffs), len(diffs),
+                )
+
         # Format for LLM consumption (used in Sprint 4+)
         formatted_diff = format_diff_for_llm(diffs)
         diff_summary = format_diff_summary(diffs)
@@ -192,12 +216,23 @@ async def github_webhook(request: Request):
             pr_metadata["pr_number"],
             exc,
         )
+        review_config = None
 
-    # Step 5: Run multi-agent review pipeline (Sprint 6)
+    # Step 5: Run multi-agent review pipeline 
     review_comments = []
     if diff_summary and formatted_diff:
         try:
-            review_comments = await run_review_pipeline(formatted_diff)
+            pipeline_kwargs = {}
+            if review_config:
+                pipeline_kwargs = {
+                    "enabled_agents": review_config.enabled_agents,
+                    "threshold": review_config.threshold,
+                    "max_comments": review_config.max_comments,
+                    "custom_rules": review_config.custom_rules,
+                }
+            review_comments = await run_review_pipeline(
+                formatted_diff, **pipeline_kwargs
+            )
 
             for comment in review_comments:
                 logger.info(
@@ -232,7 +267,7 @@ async def github_webhook(request: Request):
 
             has_critical = counts["critical"] > 0
 
-            # Determine review event type (Sprint 7)
+            # Determine review event type 
             if has_critical:
                 review_event = "REQUEST_CHANGES"
                 header = "### AI Code Review — Changes Requested"
