@@ -26,31 +26,55 @@ def aggregate_comments(
     all_comments: list[ReviewComment],
     *,
     max_comments: int | None = None,
+    threshold: str | None = None,
 ) -> list[ReviewComment]:
     """
-    Deduplicate, sort, and cap review comments from multiple agents.
+    Deduplicate, sort, cap, and threshold-filter review comments.
 
     Deduplication: If multiple agents flag the same (file, line), keep
     the one with the highest severity. If same severity, merge messages.
 
+    Threshold filtering: Comments below the configured severity threshold
+    are dropped. E.g. threshold='warning' drops all 'suggestion' comments.
+
     Args:
         all_comments: Flat list of comments from all agents.
         max_comments: Max comments to return. Defaults to env MAX_COMMENTS_PER_PR.
+        threshold:    Min severity to keep. Defaults to env REVIEW_THRESHOLD.
 
     Returns:
-        Deduplicated, sorted, capped list of ReviewComment.
+        Deduplicated, sorted, capped, filtered list of ReviewComment.
     """
     if max_comments is None:
         max_comments = int(os.getenv("MAX_COMMENTS_PER_PR", "20"))
+
+    if threshold is None:
+        threshold = os.getenv("REVIEW_THRESHOLD", "suggestion").lower().strip()
 
     if not all_comments:
         return []
 
     logger.info("Aggregating %d raw comments from all agents", len(all_comments))
 
+    # Filter by threshold
+    threshold_priority = _SEVERITY_PRIORITY.get(threshold, 2)
+    filtered = [
+        c for c in all_comments
+        if _SEVERITY_PRIORITY.get(c.severity, 9) <= threshold_priority
+    ]
+
+    if len(filtered) < len(all_comments):
+        logger.info(
+            "Threshold '%s' filtered out %d comments",
+            threshold, len(all_comments) - len(filtered),
+        )
+
+    if not filtered:
+        return []
+
     # Group by (file, line)
     grouped: dict[tuple[str, int], list[ReviewComment]] = {}
-    for comment in all_comments:
+    for comment in filtered:
         key = (comment.file, comment.line)
         grouped.setdefault(key, []).append(comment)
 
@@ -101,7 +125,8 @@ def aggregate_comments(
         deduped = deduped[:max_comments]
 
     logger.info(
-        "Aggregation complete: %d comments (from %d raw)",
-        len(deduped), len(all_comments),
+        "Aggregation complete: %d comments (from %d raw, threshold=%s)",
+        len(deduped), len(all_comments), threshold,
     )
     return deduped
+

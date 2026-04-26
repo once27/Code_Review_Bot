@@ -217,33 +217,51 @@ async def github_webhook(request: Request):
             )
 
     logger.info(
-        "✅ PR #%s processed — diff %s, %d review comments",
+        "PR #%s processed — diff %s, %d review comments",
         pr_metadata["pr_number"],
         "extracted" if diff_summary else "failed",
         len(review_comments),
     )
 
-    # Step 6: Post results to GitHub (Sprint 5)
     if diff_summary and review_comments:
         try:
-            # Construct summary text
+            # Count severities
             counts = {"critical": 0, "warning": 0, "suggestion": 0}
             for c in review_comments:
                 counts[c.severity] = counts.get(c.severity, 0) + 1
-            
-            summary_parts = [
-                "###AI Code Review Summary",
-                f"Analyzed **{diff_summary['total_files']}** files. Found **{len(review_comments)}** potential issues.",
-                "\n**Breakdown:**"
-            ]
-            if counts["critical"]: summary_parts.append(f"- 🔴 {counts['critical']} Critical")
-            if counts["warning"]: summary_parts.append(f"- 🟡 {counts['warning']} Warnings")
-            if counts["suggestion"]: summary_parts.append(f"- 💡 {counts['suggestion']} Suggestions")
-            
-            if not any(counts.values()):
-                summary_parts.append("\nNo major issues found. LGTM!")
+
+            has_critical = counts["critical"] > 0
+
+            # Determine review event type (Sprint 7)
+            if has_critical:
+                review_event = "REQUEST_CHANGES"
+                header = "### AI Code Review — Changes Requested"
+                status_line = (
+                    f"Found **{counts['critical']} critical** issue(s) "
+                    f"that must be resolved before merging."
+                )
+            else:
+                review_event = "COMMENT"
+                header = "### AI Code Review Summary"
+                status_line = (
+                    f"Analyzed **{diff_summary['total_files']}** file(s). "
+                    f"Found **{len(review_comments)}** potential issue(s)."
+                )
+
+            summary_parts = [header, status_line, "\n**Breakdown:**"]
+            if counts["critical"]:
+                summary_parts.append(f"- 🔴 {counts['critical']} Critical")
+            if counts["warning"]:
+                summary_parts.append(f"- 🟡 {counts['warning']} Warnings")
+            if counts["suggestion"]:
+                summary_parts.append(f"- 💡 {counts['suggestion']} Suggestions")
 
             summary_text = "\n".join(summary_parts)
+
+            logger.info(
+                "Review event: %s (critical=%d, warning=%d, suggestion=%d)",
+                review_event, counts["critical"], counts["warning"], counts["suggestion"],
+            )
 
             # Map comments to GitHub format
             github_comments = []
@@ -262,6 +280,7 @@ async def github_webhook(request: Request):
                 commit_sha=pr_metadata["head_sha"],
                 comments=github_comments,
                 summary=summary_text,
+                event=review_event,
             )
         except Exception as exc:
             logger.error("Failed to post GitHub review: %s", exc)

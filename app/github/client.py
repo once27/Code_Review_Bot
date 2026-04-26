@@ -268,6 +268,7 @@ class GitHubClient:
         commit_sha: str,
         comments: list[dict],
         summary: str | None = None,
+        event: str = "COMMENT",
     ) -> None:
         """
         Post a bundle of review comments to a Pull Request as a single Review.
@@ -279,11 +280,12 @@ class GitHubClient:
             commit_sha: The SHA of the commit being reviewed (important!).
             comments:   List of dicts with: {path, line, body, [side]}.
             summary:    Optional PR-level summary text.
+            event:      Review event type: 'COMMENT', 'REQUEST_CHANGES', or 'APPROVE'.
         """
         full_name = f"{owner}/{repo_name}"
         logger.info(
-            "Posting review with %d comments on PR #%d (%s)",
-            len(comments), pr_number, full_name,
+            "Posting review (%s) with %d comments on PR #%d (%s)",
+            event, len(comments), pr_number, full_name,
         )
 
         try:
@@ -301,18 +303,46 @@ class GitHubClient:
                     "side": c.get("side", "RIGHT"),
                 })
 
-            pr.create_review(
-                commit=repo.get_commit(commit_sha),
-                body=summary or "AI Code Review completed.",
-                event="COMMENT",
-                comments=github_comments,
-            )
-            logger.info("Review posted successfully to PR #%d", pr_number)
+            commit = repo.get_commit(commit_sha)
+            body = summary or "AI Code Review completed."
+
+            try:
+                pr.create_review(
+                    commit=commit,
+                    body=body,
+                    event=event,
+                    comments=github_comments,
+                )
+                logger.info(
+                    "Review posted successfully to PR #%d (event=%s)",
+                    pr_number, event,
+                )
+            except GithubException as inner_exc:
+                # GitHub returns 422 when requesting changes on own PR.
+                # Fallback to COMMENT event so feedback still posts.
+                if inner_exc.status == 422 and event == "REQUEST_CHANGES":
+                    logger.warning(
+                        "REQUEST_CHANGES failed (422) on PR #%d — "
+                        "falling back to COMMENT (likely own PR). Detail: %s",
+                        pr_number, inner_exc,
+                    )
+                    pr.create_review(
+                        commit=commit,
+                        body="⚠️ **Would have blocked merge** "
+                             "but GitHub doesn't allow requesting changes on "
+                             "your own PR.\n\n" + body,
+                        event="COMMENT",
+                        comments=github_comments,
+                    )
+                    logger.info(
+                        "Review posted to PR #%d with COMMENT fallback",
+                        pr_number,
+                    )
+                else:
+                    raise
 
         except GithubException as exc:
             logger.error(
                 "Failed to post review to PR #%d on %s: %s",
                 pr_number, full_name, exc,
             )
-            
-
