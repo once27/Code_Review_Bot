@@ -231,7 +231,7 @@ class GitHubClient:
         """
         Fetch raw content of a single file from the repository.
 
-        Useful for RAG indexing and context retrieval in later sprints.
+        Useful for RAG indexing and context retrieval.
 
         Args:
             owner:     Repository owner.
