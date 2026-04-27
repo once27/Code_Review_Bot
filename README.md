@@ -17,6 +17,19 @@ A self-hosted, codebase-aware GitHub bot that analyzes pull requests using a **m
 
 ---
 
+## 🎯 Current Project Capabilities
+
+The exact features implemented in the bot so far include:
+
+- **Automated Webhook Pipeline**: Listens to GitHub PR events and fetches Git diffs automatically while intelligently filtering out binary, auto-generated, and lock files.
+- **Parallel Multi-Agent Analysis**: Code changes are analyzed concurrently by a specialized team of LLM agents (Security, Performance, Logic, and Style), dramatically reducing review time.
+- **Aggregated & Filtered Feedback**: Automatically deduplicates overlapping findings from multiple agents, sorts them by severity (Critical, Warning, Suggestion), and strictly caps the maximum number of posted comments.
+- **Custom Repository Rules**: Natively parses a `.codereview.yml` file from the target repository, allowing teams to toggle specific agents, apply path ignore patterns, and enforce custom team standards directly injected into the AI prompts.
+- **GitHub Gatekeeping**: Posts inline PR review comments using `PyGitHub`. Automatically detects high-severity issues and submits a `REQUEST_CHANGES` review to strictly block merging.
+- **Persistent Memory**: Backed by a relational database (SQLite for local dev, PostgreSQL for production) via SQLAlchemy, the bot permanently records review execution statistics, enabled configurations, and individual findings for future analytics.
+
+---
+
 ## 🛠️ Tech Stack
 
 | Layer | Technology |

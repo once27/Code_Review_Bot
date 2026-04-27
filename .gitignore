@@ -94,3 +94,7 @@ t
 .agents
 .claude
 skills-lock.json
+
+reviews.db
+reviews.db-shm
+reviews.db-wal

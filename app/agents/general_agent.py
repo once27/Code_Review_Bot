@@ -1,9 +1,9 @@
 """
 General Review Agent — Single all-purpose code reviewer.
 
-This is the Sprint 4 MVP agent. It covers all review concerns in one pass:
-security, performance, logic, and style. In Sprint 6, this will be replaced
-by four specialized agents running in parallel.
+This is an all-purpose review agent. It covers all review concerns in one pass:
+security, performance, logic, and style. This is primarily for single-agent
+deployments or legacy support.
 
 Usage:
     agent = GeneralReviewAgent()
@@ -65,11 +65,11 @@ Example output:
 
 class GeneralReviewAgent(ReviewAgent):
     """
-    All-purpose code review agent for Sprint 4 MVP.
+    All-purpose code review agent for single-pass analysis.
 
     Reviews diffs for security, performance, logic, and style issues
     in a single LLM call. Will be superseded by specialized agents
-    in Sprint 6 (multi-agent pipeline).
+    as shown in the multi-agent pipeline.
     """
 
     def __init__(self, **kwargs):

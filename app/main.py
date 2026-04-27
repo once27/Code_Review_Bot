@@ -23,6 +23,8 @@ from app.github.webhook import parse_pr_event, validate_webhook_signature
 from app.github.client import GitHubClient
 from app.github.diff_formatter import format_diff_for_llm, format_diff_summary
 from app.agents.pipeline import run_review_pipeline
+from app.db.session import init_db
+from app.db.crud import save_review
 
 # ---------------------------------------------------------------------------
 # Environment & Logging Setup
@@ -65,6 +67,13 @@ async def lifespan(app: FastAPI):
     """
     logger.info("AI Code Review Bot starting up...")
     logger.info("   Environment loaded from .env")
+
+    # Initialize database tables
+    try:
+        init_db()
+    except Exception as exc:
+        logger.warning("DB init failed (non-fatal): %s", exc)
+
     yield
     logger.info("AI Code Review Bot shutting down...")
 
@@ -162,7 +171,7 @@ async def github_webhook(request: Request):
     if pr_metadata is None:
         return {"status": "ignored", "reason": "action not supported"}
 
-    # Step 4: Fetch PR diff from GitHub API (Sprint 3)
+    # Step 4: Fetch PR diff from GitHub API
     diff_summary = None
     try:
         client = GitHubClient()
@@ -172,7 +181,7 @@ async def github_webhook(request: Request):
             pr_number=pr_metadata["pr_number"],
         )
 
-        # Step 4b: Fetch repo config (Sprint 8)
+        # Step 4b: Fetch repo config
         review_config = client.fetch_review_config(
             owner=pr_metadata["repo_owner"],
             repo_name=pr_metadata["repo_name"],
@@ -196,7 +205,7 @@ async def github_webhook(request: Request):
                     original_count - len(diffs), len(diffs),
                 )
 
-        # Format for LLM consumption (used in Sprint 4+)
+        # Format for LLM consumption
         formatted_diff = format_diff_for_llm(diffs)
         diff_summary = format_diff_summary(diffs)
 
@@ -317,6 +326,23 @@ async def github_webhook(request: Request):
                 summary=summary_text,
                 event=review_event,
             )
+
+            # Step 7: Save review to database
+            try:
+                save_review(
+                    repo_owner=pr_metadata["repo_owner"],
+                    repo_name=pr_metadata["repo_name"],
+                    pr_number=pr_metadata["pr_number"],
+                    pr_author=pr_metadata.get("pr_author"),
+                    commit_sha=pr_metadata["head_sha"],
+                    event_type=review_event,
+                    comments=review_comments,
+                    agents_used=review_config.enabled_agents if review_config else None,
+                    threshold=review_config.threshold if review_config else None,
+                )
+            except Exception as exc:
+                logger.error("Failed to save review to DB: %s", exc)
+
         except Exception as exc:
             logger.error("Failed to post GitHub review: %s", exc)
 

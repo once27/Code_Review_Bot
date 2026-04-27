@@ -1,7 +1,7 @@
 """
 Multi-Agent Review Pipeline — Parallel execution of specialist agents.
 
-Replaces the single GeneralReviewAgent from Sprint 4 with four
+Replaces the single GeneralReviewAgent with four
 specialized agents running concurrently via asyncio.gather.
 
 Usage:
