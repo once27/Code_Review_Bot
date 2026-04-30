@@ -38,16 +38,18 @@ async def run_review_pipeline(
     threshold: str | None = None,
     enabled_agents: list[str] | None = None,
     custom_rules: list[str] | None = None,
+    codebase_context: str | None = None,
 ) -> list[ReviewComment]:
     """
     Run specialist agents in parallel and aggregate results.
 
     Args:
         diff_text:      Formatted diff string from diff_formatter.
-        max_comments:   Optional cap on total comments returned.
-        threshold:      Min severity to keep (from .codereview.yml).
-        enabled_agents: Which agents to run (from .codereview.yml).
-        custom_rules:   Extra rules injected into agent prompts.
+        max_comments:      Optional cap on total comments returned.
+        threshold:         Min severity to keep (from .codereview.yml).
+        enabled_agents:    Which agents to run (from .codereview.yml).
+        custom_rules:      Extra rules injected into agent prompts.
+        codebase_context:  RAG-retrieved context from repository.
 
     Returns:
         Deduplicated, sorted list of ReviewComment objects.
@@ -83,9 +85,13 @@ async def run_review_pipeline(
     )
     start = time.monotonic()
 
+    # Log RAG context if present
+    if codebase_context:
+        logger.info("RAG codebase context injected (%d chars)", len(codebase_context))
+
     # Run all agents in parallel
     results = await asyncio.gather(
-        *(agent.review(review_input) for agent in agents),
+        *(agent.review(review_input, context=codebase_context) for agent in agents),
         return_exceptions=True,
     )
 
