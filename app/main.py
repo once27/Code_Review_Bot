@@ -25,6 +25,8 @@ from app.github.diff_formatter import format_diff_for_llm, format_diff_summary
 from app.agents.pipeline import run_review_pipeline
 from app.db.session import init_db
 from app.db.crud import save_review
+from app.rag.indexer import index_repository
+from app.rag.retriever import retrieve_context
 
 # ---------------------------------------------------------------------------
 # Environment & Logging Setup
@@ -130,6 +132,33 @@ async def ping():
 
 
 # ---------------------------------------------------------------------------
+# Repository Index Endpoint
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/repos/index",
+    tags=["RAG"],
+    summary="Index a repository for RAG context",
+    response_description="Indexing statistics",
+)
+async def index_repo(owner: str, repo_name: str, branch: str | None = None):
+    """
+    Trigger codebase indexing for a repository.
+
+    Clones the repo, chunks Python files, embeds them, and stores
+    in ChromaDB for RAG-powered context retrieval during reviews.
+
+    Query params:
+        owner:     Repository owner (e.g., "once27")
+        repo_name: Repository name (e.g., "test-review-bot")
+        branch:    Optional branch to index (defaults to repo default branch)
+    """
+    logger.info("Indexing requested for %s/%s (branch: %s)", owner, repo_name, branch)
+    stats = index_repository(owner, repo_name, branch)
+    return stats
+
+
+# ---------------------------------------------------------------------------
 # GitHub Webhook Endpoint
 # ---------------------------------------------------------------------------
 
@@ -227,7 +256,21 @@ async def github_webhook(request: Request):
         )
         review_config = None
 
-    # Step 5: Run multi-agent review pipeline 
+    # Step 5: Retrieve RAG codebase context
+    codebase_context = None
+    if diff_summary:
+        try:
+            repo_key = f"{pr_metadata['repo_owner']}/{pr_metadata['repo_name']}"
+            base_branch = pr_metadata.get("base_branch")
+            codebase_context = retrieve_context(
+                formatted_diff, repo_key, branch=base_branch
+            )
+            if codebase_context:
+                logger.info("RAG context retrieved (%d chars)", len(codebase_context))
+        except Exception as exc:
+            logger.warning("RAG retrieval failed (non-fatal): %s", exc)
+
+    # Step 6: Run multi-agent review pipeline
     review_comments = []
     if diff_summary and formatted_diff:
         try:
@@ -239,6 +282,9 @@ async def github_webhook(request: Request):
                     "max_comments": review_config.max_comments,
                     "custom_rules": review_config.custom_rules,
                 }
+            if codebase_context:
+                pipeline_kwargs["codebase_context"] = codebase_context
+
             review_comments = await run_review_pipeline(
                 formatted_diff, **pipeline_kwargs
             )

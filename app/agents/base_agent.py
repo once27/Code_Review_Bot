@@ -129,7 +129,7 @@ class ReviewAgent(ABC):
 
         self._prompt = ChatPromptTemplate.from_messages([
             ("system", self.system_prompt),
-            ("human", "Review this diff:\n\n{diff}"),
+            ("human", "{context}\nReview this diff:\n\n{diff}"),
         ])
 
         self._chain = self._prompt | self._llm
@@ -145,12 +145,13 @@ class ReviewAgent(ABC):
         """Return the system prompt for this agent."""
         ...
 
-    async def review(self, diff_text: str) -> list[ReviewComment]:
+    async def review(self, diff_text: str, *, context: str | None = None) -> list[ReviewComment]:
         """
         Analyze a code diff and return structured review comments.
 
         Args:
             diff_text: Formatted diff string from diff_formatter.
+            context:   Optional codebase context from RAG retriever.
 
         Returns:
             List of ReviewComment objects found by this agent.
@@ -161,8 +162,13 @@ class ReviewAgent(ABC):
 
         start = time.monotonic()
 
+        # Build context block (empty string if no RAG context)
+        context_block = ""
+        if context:
+            context_block = context + "\n\n"
+
         try:
-            response = await self._chain.ainvoke({"diff": diff_text})
+            response = await self._chain.ainvoke({"diff": diff_text, "context": context_block})
             raw_content = response.content
 
             if isinstance(raw_content, list):
