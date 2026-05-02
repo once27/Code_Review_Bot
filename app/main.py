@@ -23,8 +23,9 @@ from app.github.webhook import parse_pr_event, validate_webhook_signature
 from app.github.client import GitHubClient
 from app.github.diff_formatter import format_diff_for_llm, format_diff_summary
 from app.agents.pipeline import run_review_pipeline
+from app.agents.memory import get_suppressed_patterns, format_suppressed_for_prompt
 from app.db.session import init_db
-from app.db.crud import save_review
+from app.db.crud import save_review, save_feedback, get_feedback_stats, get_health_score
 from app.rag.indexer import index_repository
 from app.rag.retriever import retrieve_context
 
@@ -159,6 +160,71 @@ async def index_repo(owner: str, repo_name: str, branch: str | None = None):
 
 
 # ---------------------------------------------------------------------------
+# Feedback Endpoints
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/feedback",
+    tags=["Feedback"],
+    summary="Submit developer feedback on a review comment",
+    response_description="Feedback submission result",
+)
+async def submit_feedback(comment_id: int, developer: str, action: str):
+    """
+    Record developer feedback on a bot review comment.
+
+    Query params:
+        comment_id: ID of the ReviewComment.
+        developer:  GitHub username.
+        action:     "accepted" or "dismissed".
+    """
+    if action not in ("accepted", "dismissed"):
+        return {"error": "action must be 'accepted' or 'dismissed'"}
+
+    feedback_id = save_feedback(
+        comment_id=comment_id,
+        developer=developer,
+        action=action,
+    )
+    if feedback_id:
+        return {"feedback_id": feedback_id, "status": "saved"}
+    return {"error": "Failed to save feedback. Comment may not exist."}
+
+
+@app.get(
+    "/feedback/stats",
+    tags=["Feedback"],
+    summary="Get feedback acceptance rates per agent",
+    response_description="Per-agent acceptance statistics",
+)
+async def feedback_stats(repo_owner: str, repo_name: str):
+    """
+    Get acceptance rate per agent type for a repository.
+
+    Query params:
+        repo_owner: Repository owner.
+        repo_name:  Repository name.
+    """
+    return get_feedback_stats(repo_owner, repo_name)
+
+
+@app.get(
+    "/health/{repo_owner}/{repo_name}",
+    tags=["Feedback"],
+    summary="Get Review Health Score for a repo",
+    response_description="Weighted health score over last 30 days",
+)
+async def health_score(repo_owner: str, repo_name: str):
+    """
+    Calculate Review Health Score.
+
+    Score = (accepted × weight) / total over last 30 days.
+    Weights: critical=3, warning=2, suggestion=1.
+    """
+    return get_health_score(repo_owner, repo_name)
+
+
+# ---------------------------------------------------------------------------
 # GitHub Webhook Endpoint
 # ---------------------------------------------------------------------------
 
@@ -270,7 +336,19 @@ async def github_webhook(request: Request):
         except Exception as exc:
             logger.warning("RAG retrieval failed (non-fatal): %s", exc)
 
-    # Step 6: Run multi-agent review pipeline
+    # Step 6: Get suppressed patterns from feedback loop
+    suppressed_text = None
+    try:
+        suppressed = get_suppressed_patterns(
+            pr_metadata["repo_owner"], pr_metadata["repo_name"]
+        )
+        if suppressed:
+            suppressed_text = format_suppressed_for_prompt(suppressed)
+            logger.info("Suppressed %d patterns from feedback loop", len(suppressed))
+    except Exception as exc:
+        logger.warning("Suppressed pattern lookup failed (non-fatal): %s", exc)
+
+    # Step 7: Run multi-agent review pipeline
     review_comments = []
     if diff_summary and formatted_diff:
         try:
@@ -284,6 +362,8 @@ async def github_webhook(request: Request):
                 }
             if codebase_context:
                 pipeline_kwargs["codebase_context"] = codebase_context
+            if suppressed_text:
+                pipeline_kwargs["suppressed_patterns"] = suppressed_text
 
             review_comments = await run_review_pipeline(
                 formatted_diff, **pipeline_kwargs

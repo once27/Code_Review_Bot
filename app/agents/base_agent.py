@@ -145,13 +145,20 @@ class ReviewAgent(ABC):
         """Return the system prompt for this agent."""
         ...
 
-    async def review(self, diff_text: str, *, context: str | None = None) -> list[ReviewComment]:
+    async def review(
+        self,
+        diff_text: str,
+        *,
+        context: str | None = None,
+        suppressed_patterns: str | None = None,
+    ) -> list[ReviewComment]:
         """
         Analyze a code diff and return structured review comments.
 
         Args:
-            diff_text: Formatted diff string from diff_formatter.
-            context:   Optional codebase context from RAG retriever.
+            diff_text:           Formatted diff string from diff_formatter.
+            context:             Optional codebase context from RAG retriever.
+            suppressed_patterns: Optional suppressed patterns from feedback loop.
 
         Returns:
             List of ReviewComment objects found by this agent.
@@ -164,8 +171,10 @@ class ReviewAgent(ABC):
 
         # Build context block (empty string if no RAG context)
         context_block = ""
+        if suppressed_patterns:
+            context_block += suppressed_patterns + "\n\n"
         if context:
-            context_block = context + "\n\n"
+            context_block += context + "\n\n"
 
         try:
             response = await self._chain.ainvoke({"diff": diff_text, "context": context_block})
