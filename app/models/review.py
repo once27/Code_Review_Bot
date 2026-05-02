@@ -98,6 +98,11 @@ class ReviewComment(Base):
 
     # Relationships
     review = relationship("Review", back_populates="comments")
+    feedbacks = relationship(
+        "Feedback",
+        back_populates="comment",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         Index("ix_comments_severity", "severity"),
@@ -108,3 +113,37 @@ class ReviewComment(Base):
         return (
             f"<ReviewComment [{self.severity}] {self.file}:{self.line}>"
         )
+
+
+class Feedback(Base):
+    """Developer feedback on a review comment (accepted or dismissed)."""
+
+    __tablename__ = "feedbacks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    comment_id = Column(Integer, ForeignKey("review_comments.id"), nullable=False)
+
+    # Who gave feedback and what action
+    developer = Column(String(255), nullable=False)
+    action = Column(String(20), nullable=False)  # "accepted" or "dismissed"
+
+    # Timestamps
+    created_at = Column(
+        DateTime, nullable=False,
+        default=datetime.datetime.utcnow,
+    )
+
+    # Relationships
+    comment = relationship("ReviewComment", back_populates="feedbacks")
+
+    __table_args__ = (
+        Index("ix_feedbacks_comment", "comment_id"),
+        Index("ix_feedbacks_action", "action"),
+    )
+
+    def __repr__(self):
+        return (
+            f"<Feedback #{self.id} comment={self.comment_id} "
+            f"action={self.action} by={self.developer}>"
+        )
+
