@@ -26,8 +26,10 @@ from app.agents.pipeline import run_review_pipeline
 from app.agents.memory import get_suppressed_patterns, format_suppressed_for_prompt
 from app.db.session import init_db
 from app.db.crud import save_review, save_feedback, get_feedback_stats, get_health_score
-from app.rag.indexer import index_repository
+from app.rag.tasks import run_index_repository
 from app.rag.retriever import retrieve_context
+from celery.result import AsyncResult
+from app.worker import celery_app
 
 # ---------------------------------------------------------------------------
 # Environment & Logging Setup
@@ -144,19 +146,48 @@ async def ping():
 )
 async def index_repo(owner: str, repo_name: str, branch: str | None = None):
     """
-    Trigger codebase indexing for a repository.
-
-    Clones the repo, chunks Python files, embeds them, and stores
-    in ChromaDB for RAG-powered context retrieval during reviews.
+    Trigger codebase indexing for a repository in the background.
 
     Query params:
         owner:     Repository owner (e.g., "once27")
         repo_name: Repository name (e.g., "test-review-bot")
         branch:    Optional branch to index (defaults to repo default branch)
     """
-    logger.info("Indexing requested for %s/%s (branch: %s)", owner, repo_name, branch)
-    stats = index_repository(owner, repo_name, branch)
-    return stats
+    logger.info("Background indexing requested for %s/%s (branch: %s)", owner, repo_name, branch)
+    
+    # Trigger celery task
+    task = run_index_repository.delay(owner, repo_name, branch)
+    
+    return {
+        "task_id": task.id,
+        "status": "processing",
+        "message": f"Indexing started for {owner}/{repo_name}"
+    }
+
+
+@app.get(
+    "/repos/index/status/{task_id}",
+    tags=["RAG"],
+    summary="Check status of background indexing",
+    response_description="Task status and results",
+)
+async def check_index_status(task_id: str):
+    """
+    Poll the status of a Celery background indexing task.
+    """
+    task_result = AsyncResult(task_id, app=celery_app)
+    
+    response = {
+        "task_id": task_id,
+        "status": task_result.status,
+    }
+    
+    if task_result.status == "SUCCESS":
+        response["result"] = task_result.result
+    elif task_result.status == "FAILURE":
+        response["error"] = str(task_result.result)
+        
+    return response
 
 
 # ---------------------------------------------------------------------------

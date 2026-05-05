@@ -98,3 +98,5 @@ skills-lock.json
 reviews.db
 reviews.db-shm
 reviews.db-wal
+
+graphify-out
