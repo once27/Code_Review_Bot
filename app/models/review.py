@@ -147,3 +147,31 @@ class Feedback(Base):
             f"action={self.action} by={self.developer}>"
         )
 
+
+class DashboardUser(Base):
+    """Users allowed to access the Streamlit admin dashboard."""
+
+    __tablename__ = "dashboard_users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    github_username = Column(String(255), nullable=False, unique=True)
+    github_id = Column(Integer, nullable=True)
+    avatar_url = Column(String(500), nullable=True)
+    role = Column(String(20), nullable=False, default="viewer")  # "admin" or "viewer"
+
+    # Timestamps
+    created_at = Column(
+        DateTime, nullable=False,
+        default=datetime.datetime.utcnow,
+    )
+    last_login = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_dashboard_users_username", "github_username"),
+    )
+
+    def __repr__(self):
+        return (
+            f"<DashboardUser {self.github_username} role={self.role}>"
+        )
+
